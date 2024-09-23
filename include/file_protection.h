@@ -28,6 +28,7 @@
 #define MAX_TEMPLATES 100
 #define LOG_FILE "file_protection.log"
 #define MAX_PATH_LEN 4096
+#define MAX_WATCHES 1000
 
 extern char *templates[MAX_TEMPLATES];
 extern int template_count;
@@ -39,7 +40,7 @@ void log_message(const char *message);
 int load_templates();
 int is_subdirectory(const char *parent, const char *sub);
 int is_protected(const char *filename);
-void handle_event(struct inotify_event *event);
+void handle_event(int fd, struct inotify_event *event);
 void protect_file(const char *path);
 void set_immutable(const char *path);
 void clear_immutable_flag(const char *path);
@@ -47,6 +48,7 @@ void restore_permissions(const char *path);
 void create_log_buffer(char *buffer, size_t buffer_size, const char *format, ...);
 FILE *safe_fopen(const char *path, const char *mode);
 void safe_fclose(FILE *file, const char *path);
+void add_watch_recursive(int fd, const char *path);
 
 // User interface
 void print_help();
@@ -57,6 +59,7 @@ int authenticate_user();
 void change_password_interactive();
 void print_status();
 void disable_protection();
+void remove_protection_recursive(const char *path);
 
 // System initialization and cleanup
 int initialize_protection_system();

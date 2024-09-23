@@ -2,16 +2,17 @@
 
 ## Overview
 
-The File Protection System is a robust C-based application designed to safeguard files within a specified directory. It employs file system monitoring and access control mechanisms to prevent unauthorized modifications, deletions, or moves of protected files.
+The File Protection System is a robust C-based application designed to safeguard files within a specified directory and its subdirectories. It employs recursive file system monitoring and access control mechanisms to prevent unauthorized modifications, deletions, or moves of protected files.
 
 ## Features
 
-- Real-time file system monitoring
-- Protection against file modifications, deletions, and moves
+- Real-time recursive file system monitoring
+- Protection against file modifications, deletions, and moves in the target directory and all subdirectories
 - Template-based file protection
 - Password-protected system control
 - Logging of all protection events and system activities
 - User-friendly command-line interface
+- Recursive protection and unprotection of files
 
 ## Requirements
 
@@ -70,20 +71,21 @@ sudo /bin/file_protection
 ### Available Commands
 
 - `help`: Display available commands
-- `enable`: Enable file protection
-- `disable`: Disable file protection (requires password)
+- `enable`: Enable file protection recursively
+- `disable`: Disable file protection recursively (requires password)
 - `change`: Change the system password
 - `status`: Show current protection status
 - `stop`: Exit the program
 
 ## How It Works
 
-1. The system monitors the specified directory using inotify.
+1. The system recursively monitors the specified directory and all its subdirectories using inotify.
 2. When a file event occurs, it checks if the file matches any protected patterns.
 3. For protected files, it prevents modifications by:
    - Setting the immutable flag
    - Changing permissions to read-only
    - Blocking creation, deletion, and move operations
+4. The system also monitors for new subdirectories and automatically adds them to the watch list.
 
 ## File Structure
 
@@ -105,18 +107,21 @@ The system logs all activities to `file_protection.log` in the same directory as
 - File events (create, delete, modify, move)
 - User authentication attempts
 - Password changes
+- Recursive protection and unprotection operations
 
 ## Security Considerations
 
 - The system requires root privileges to set file attributes and permissions.
 - The password is stored as a hash in the `template.tbl` file.
 - Ensure that the `template.tbl` file has restricted read/write permissions.
+- The system now protects files in subdirectories, increasing the scope of protection.
 
 ## Limitations
 
-- The system currently only protects files in a single directory (not recursive).
+- ~~The system currently only protects files in a single directory (not recursive).~~ The system now protects files recursively in the specified directory and all its subdirectories.
 - It does not prevent reading of protected files, only modifications.
 - Root users can still modify protected files (as the application runs with root privileges).
+- Large directory structures with many files and subdirectories may impact system performance.
 
 ## Contributing
 
@@ -136,3 +141,10 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 - Linux inotify mechanism for file system monitoring
 - libcrypt for password hashing
+
+## Recent Updates
+
+- Added recursive file protection for all subdirectories
+- Improved the `disable` command to recursively remove protection from all files
+- Enhanced error handling and logging for better troubleshooting
+- Updated the initialization process to provide more detailed error messages

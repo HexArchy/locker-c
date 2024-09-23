@@ -5,6 +5,16 @@ int template_count = 0;
 int protection_enabled = 0;
 char protected_directory[MAX_PATH_LEN] = {0};
 
+// New structure to store watch descriptors
+typedef struct
+{
+    int wd;
+    char path[MAX_PATH_LEN];
+} WatchInfo;
+
+WatchInfo watches[MAX_WATCHES];
+int watch_count = 0;
+
 void log_message(const char *message)
 {
     FILE *log_file = fopen(LOG_FILE, "a");
@@ -27,7 +37,9 @@ int load_templates()
     FILE *file = fopen(TEMPLATE_FILE, "r");
     if (file == NULL)
     {
-        log_message("Error opening template file");
+        char error_buf[256];
+        snprintf(error_buf, sizeof(error_buf), "Error opening template file: %s", strerror(errno));
+        log_message(error_buf);
         return -1;
     }
 
@@ -48,7 +60,9 @@ int load_templates()
             char *resolved_path = realpath(line, NULL);
             if (resolved_path == NULL)
             {
-                log_message("Error resolving protected directory path");
+                char error_buf[MAX_PATH_LEN + 100];
+                snprintf(error_buf, sizeof(error_buf), "Error resolving protected directory path '%s': %s", line, strerror(errno));
+                log_message(error_buf);
                 fclose(file);
                 return -1;
             }
@@ -76,6 +90,59 @@ int load_templates()
     fclose(file);
     log_message("Templates loaded successfully");
     return 0;
+}
+
+// add_watch_recursive function to add a watch recursively
+void add_watch_recursive(int fd, const char *path)
+{
+    DIR *dir;
+    struct dirent *entry;
+
+    dir = opendir(path);
+    if (dir == NULL)
+    {
+        char log_buf[MAX_PATH_LEN + 100];
+        snprintf(log_buf, sizeof(log_buf), "Failed to open directory for watching: %s", path);
+        log_message(log_buf);
+        return;
+    }
+
+    int wd = inotify_add_watch(fd, path, IN_CREATE | IN_DELETE | IN_MOVED_FROM | IN_MOVED_TO | IN_MODIFY);
+    if (wd < 0)
+    {
+        char log_buf[MAX_PATH_LEN + 100];
+        snprintf(log_buf, sizeof(log_buf), "Failed to add watch for %s: %s", path, strerror(errno));
+        log_message(log_buf);
+    }
+    else
+    {
+        if (watch_count < MAX_WATCHES)
+        {
+            watches[watch_count].wd = wd;
+            strncpy(watches[watch_count].path, path, MAX_PATH_LEN);
+            watch_count++;
+        }
+        else
+        {
+            log_message("Maximum number of watches reached");
+        }
+    }
+
+    while ((entry = readdir(dir)) != NULL)
+    {
+        if (entry->d_type == DT_DIR)
+        {
+            if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0)
+            {
+                continue;
+            }
+            char full_path[MAX_PATH_LEN];
+            snprintf(full_path, sizeof(full_path), "%s/%s", path, entry->d_name);
+            add_watch_recursive(fd, full_path);
+        }
+    }
+
+    closedir(dir);
 }
 
 // Function to check if a directory is a subdirectory of another
@@ -133,42 +200,57 @@ int is_protected(const char *filename)
 }
 
 // Function to handle file system events
-void handle_event(struct inotify_event *event)
+void handle_event(int fd, struct inotify_event *event)
 {
     if (event->len && protection_enabled)
     {
-        if (strcmp(event->name, LOG_FILE) == 0)
+        char *watch_path = NULL;
+        for (int i = 0; i < watch_count; i++)
         {
+            if (watches[i].wd == event->wd)
+            {
+                watch_path = watches[i].path;
+                break;
+            }
+        }
+
+        if (watch_path == NULL)
+        {
+            log_message("Unrecognized watch descriptor");
             return;
         }
 
         char full_path[PATH_MAX];
-        int path_len = snprintf(full_path, sizeof(full_path), "%s/%s", protected_directory, event->name);
-        if (path_len < 0 || path_len >= (int)sizeof(full_path))
+        snprintf(full_path, sizeof(full_path), "%s/%s", watch_path, event->name);
+
+        if (strcmp(event->name, LOG_FILE) == 0)
         {
-            char log_buf[MAX_PATH_LEN + 100];
-            snprintf(log_buf, sizeof(log_buf), "Path too long for file: %s", event->name);
-            log_message(log_buf);
             return;
         }
 
         if (is_protected(full_path))
         {
             char log_buf[MAX_PATH_LEN + 100];
-            // Handle different types of events (create, delete, move, modify)
             if (event->mask & IN_CREATE)
             {
-                // Block creation of protected files
-                if (unlink(full_path) == 0)
+                if (event->mask & IN_ISDIR)
                 {
-                    snprintf(log_buf, sizeof(log_buf), "Blocked creation of protected file: %s", full_path);
-                    log_message(log_buf);
-                    printf("Blocked creation of protected file: %s\n", full_path);
+                    add_watch_recursive(fd, full_path);
                 }
                 else
                 {
-                    snprintf(log_buf, sizeof(log_buf), "Failed to block creation of protected file: %s", full_path);
-                    log_message(log_buf);
+                    // Block creation of protected files
+                    if (unlink(full_path) == 0)
+                    {
+                        snprintf(log_buf, sizeof(log_buf), "Blocked creation of protected file: %s", full_path);
+                        log_message(log_buf);
+                        printf("Blocked creation of protected file: %s\n", full_path);
+                    }
+                    else
+                    {
+                        snprintf(log_buf, sizeof(log_buf), "Failed to block creation of protected file: %s", full_path);
+                        log_message(log_buf);
+                    }
                 }
             }
             else if (event->mask & IN_DELETE)

@@ -14,7 +14,15 @@ int initialize_protection_system()
     if (stat(protected_directory, &st) == -1)
     {
         char log_buf[MAX_PATH_LEN + 100];
-        create_log_buffer(log_buf, sizeof(log_buf), "Protected directory does not exist or is inaccessible: %s", protected_directory);
+        snprintf(log_buf, sizeof(log_buf), "Protected directory does not exist or is inaccessible: %s (Error: %s)", protected_directory, strerror(errno));
+        log_message(log_buf);
+        return -1;
+    }
+
+    if (!S_ISDIR(st.st_mode))
+    {
+        char log_buf[MAX_PATH_LEN + 100];
+        snprintf(log_buf, sizeof(log_buf), "Protected path is not a directory: %s", protected_directory);
         log_message(log_buf);
         return -1;
     }
@@ -42,7 +50,7 @@ void cleanup_protection_system()
 
 int run_protection_system()
 {
-    int fd, wd;
+    int fd;
     char buffer[EVENT_BUF_LEN];
 
     if (initialize_protection_system() < 0)
@@ -58,18 +66,10 @@ int run_protection_system()
         return 1;
     }
 
-    wd = inotify_add_watch(fd, protected_directory, IN_CREATE | IN_DELETE | IN_MOVED_FROM | IN_MOVED_TO | IN_MODIFY);
-    if (wd < 0)
-    {
-        char log_buf[MAX_PATH_LEN + 100];
-        create_log_buffer(log_buf, sizeof(log_buf), "Failed to add inotify watch for %s: %s", protected_directory, strerror(errno));
-        log_message(log_buf);
-        close(fd);
-        return 1;
-    }
+    add_watch_recursive(fd, protected_directory);
 
     printf("File protection system started.\n");
-    printf("Protected directory: %s\n", protected_directory);
+    printf("Protected directory (recursive): %s\n", protected_directory);
     print_help();
 
     while (1)
@@ -97,7 +97,6 @@ int run_protection_system()
         }
     }
 
-    inotify_rm_watch(fd, wd);
     close(fd);
     cleanup_protection_system();
 
@@ -119,7 +118,7 @@ void handle_file_events(int fd, char *buffer)
     while (i < length)
     {
         struct inotify_event *event = (struct inotify_event *)&buffer[i];
-        handle_event(event);
+        handle_event(fd, event);
         i += EVENT_SIZE + event->len;
     }
 }

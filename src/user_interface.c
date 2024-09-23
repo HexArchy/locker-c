@@ -179,39 +179,49 @@ void print_status()
 void disable_protection()
 {
     protection_enabled = 0;
+    printf("Disabling protection...\n");
+    log_message("Disabling protection");
+
+    remove_protection_recursive(protected_directory);
+
     printf("Protection disabled.\n");
     log_message("Protection disabled");
+}
 
+void remove_protection_recursive(const char *path)
+{
     DIR *dir;
     struct dirent *entry;
+    char full_path[MAX_PATH_LEN];
 
-    dir = opendir(protected_directory);
+    dir = opendir(path);
     if (dir == NULL)
     {
-        log_message("Failed to open protected directory for restoring permissions");
+        char log_buf[MAX_PATH_LEN + 100];
+        snprintf(log_buf, sizeof(log_buf), "Failed to open directory for removing protection: %s", path);
+        log_message(log_buf);
         return;
     }
 
     while ((entry = readdir(dir)) != NULL)
     {
-        if (entry->d_type == DT_REG)
+        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0)
+            continue;
+
+        snprintf(full_path, sizeof(full_path), "%s/%s", path, entry->d_name);
+
+        if (entry->d_type == DT_DIR)
         {
-            char full_path[PATH_MAX];
-            int path_len = snprintf(full_path, sizeof(full_path), "%s/%s", protected_directory, entry->d_name);
-            if (path_len < 0 || path_len >= (int)sizeof(full_path))
+            remove_protection_recursive(full_path);
+        }
+        else if (entry->d_type == DT_REG)
+        {
+            if (is_protected(full_path))
             {
+                clear_immutable_flag(full_path);
+                restore_permissions(full_path);
                 char log_buf[MAX_PATH_LEN + 100];
-                snprintf(log_buf, sizeof(log_buf), "Path too long for file: %s", entry->d_name);
-                log_message(log_buf);
-                continue;
-            }
-
-            clear_immutable_flag(full_path);
-
-            if (chmod(full_path, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH | S_IWOTH) != 0)
-            {
-                char log_buf[MAX_PATH_LEN + 100];
-                snprintf(log_buf, sizeof(log_buf), "Failed to restore permissions for: %s", full_path);
+                snprintf(log_buf, sizeof(log_buf), "Removed protection from file: %s", full_path);
                 log_message(log_buf);
             }
         }
